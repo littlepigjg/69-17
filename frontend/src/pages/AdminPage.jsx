@@ -162,8 +162,8 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
 
     if (form.advanced_protocol_enabled && form.type === 'tcp') {
       const hs = Number(form.handshake_timeout_ms)
-      if (!Number.isInteger(hs) || hs < 10 || hs > 500) {
-        e.handshake_timeout_ms = '握手超时必须在 10-500 毫秒之间'
+      if (!Number.isInteger(hs) || hs < 10 || hs > 200) {
+        e.handshake_timeout_ms = '握手超时必须在 10-200 毫秒之间'
       }
       if (form.send_encoding === DATA_ENCODING.HEX && form.send_data) {
         if (!/^[0-9a-fA-F]*$/.test(form.send_data) || form.send_data.length % 2 !== 0) {
@@ -350,13 +350,13 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
                     ]}
                   />
                 </FormField>
-                <FormField label="握手超时（毫秒）" error={errors.handshake_timeout_ms} help="10-500ms，默认 50ms">
+                <FormField label="握手超时（毫秒）" error={errors.handshake_timeout_ms} help="10-200ms，默认 50ms">
                   <TextInput
                     type="number"
                     value={form.handshake_timeout_ms}
                     onChange={v => set('handshake_timeout_ms', v)}
                     min="10"
-                    max="500"
+                    max="200"
                   />
                 </FormField>
               </div>

@@ -11,7 +11,7 @@ const {
 const {
   validateAdvancedConfig,
   performTcpHandshake
-} = require('./protocol-handshake')
+} = require('./protocol')
 
 async function checkHttp(service) {
   let url = service.target
