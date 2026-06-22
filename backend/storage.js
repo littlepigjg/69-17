@@ -57,11 +57,43 @@ async function initDB() {
       interval_seconds INTEGER DEFAULT 30,
       timeout_ms INTEGER DEFAULT 5000,
       enabled INTEGER DEFAULT 1,
+      advanced_protocol_enabled INTEGER DEFAULT 0,
+      send_encoding TEXT DEFAULT 'text',
+      send_data TEXT DEFAULT '',
+      validation_mode TEXT DEFAULT 'length_range',
+      expected_encoding TEXT DEFAULT 'text',
+      expected_data TEXT DEFAULT '',
+      expected_regex TEXT DEFAULT '',
+      min_length INTEGER DEFAULT 1,
+      max_length INTEGER DEFAULT 65535,
+      handshake_timeout_ms INTEGER DEFAULT 50,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
   dirty = true;
+
+  try {
+    const cols = db.exec("PRAGMA table_info(services)")[0].values.map(r => r[1]);
+    const newCols = [
+      ['advanced_protocol_enabled', 'INTEGER DEFAULT 0'],
+      ['send_encoding', "TEXT DEFAULT 'text'"],
+      ['send_data', "TEXT DEFAULT ''"],
+      ['validation_mode', "TEXT DEFAULT 'length_range'"],
+      ['expected_encoding', "TEXT DEFAULT 'text'"],
+      ['expected_data', "TEXT DEFAULT ''"],
+      ['expected_regex', "TEXT DEFAULT ''"],
+      ['min_length', 'INTEGER DEFAULT 1'],
+      ['max_length', 'INTEGER DEFAULT 65535'],
+      ['handshake_timeout_ms', 'INTEGER DEFAULT 50']
+    ];
+    for (const [col, def] of newCols) {
+      if (!cols.includes(col)) {
+        db.run(`ALTER TABLE services ADD COLUMN ${col} ${def}`);
+        dirty = true;
+      }
+    }
+  } catch (e) {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS check_results (
@@ -158,12 +190,34 @@ const services = {
       timeout_ms: config.defaultTimeoutMs,
       enabled: 1,
       port: null,
+      advanced_protocol_enabled: 0,
+      send_encoding: 'text',
+      send_data: '',
+      validation_mode: 'length_range',
+      expected_encoding: 'text',
+      expected_data: '',
+      expected_regex: '',
+      min_length: 1,
+      max_length: 65535,
+      handshake_timeout_ms: 50,
       ...data
     };
     const res = run(
-      `INSERT INTO services (name, type, target, port, method, expectedStatus, interval_seconds, timeout_ms, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [payload.name, payload.type, payload.target, payload.port, payload.method, payload.expectedStatus, payload.interval_seconds, payload.timeout_ms, payload.enabled]
+      `INSERT INTO services (
+        name, type, target, port, method, expectedStatus,
+        interval_seconds, timeout_ms, enabled,
+        advanced_protocol_enabled, send_encoding, send_data,
+        validation_mode, expected_encoding, expected_data,
+        expected_regex, min_length, max_length, handshake_timeout_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        payload.name, payload.type, payload.target, payload.port,
+        payload.method, payload.expectedStatus, payload.interval_seconds,
+        payload.timeout_ms, payload.enabled,
+        payload.advanced_protocol_enabled ? 1 : 0, payload.send_encoding, payload.send_data,
+        payload.validation_mode, payload.expected_encoding, payload.expected_data,
+        payload.expected_regex, payload.min_length, payload.max_length, payload.handshake_timeout_ms
+      ]
     );
     saveDB();
     return queryOne('SELECT * FROM services WHERE id = ?', [res.lastID]);
@@ -172,7 +226,10 @@ const services = {
     const keys = Object.keys(data);
     if (keys.length === 0) return queryOne('SELECT * FROM services WHERE id = ?', [id]);
     const sets = keys.map(k => `${k} = ?`).join(', ');
-    const values = keys.map(k => data[k]);
+    const values = keys.map(k => {
+      if (k === 'advanced_protocol_enabled') return data[k] ? 1 : 0;
+      return data[k];
+    });
     run(`UPDATE services SET ${sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [...values, id]);
     saveDB();
     return queryOne('SELECT * FROM services WHERE id = ?', [id]);

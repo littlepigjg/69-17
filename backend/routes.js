@@ -71,7 +71,13 @@ router.put('/services/:id', async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Service not found' });
 
     const data = req.body || {};
-    const allowed = ['name', 'type', 'target', 'port', 'method', 'expectedStatus', 'interval_seconds', 'timeout_ms', 'enabled'];
+    const allowed = [
+      'name', 'type', 'target', 'port', 'method', 'expectedStatus',
+      'interval_seconds', 'timeout_ms', 'enabled',
+      'advanced_protocol_enabled', 'send_encoding', 'send_data',
+      'validation_mode', 'expected_encoding', 'expected_data',
+      'expected_regex', 'min_length', 'max_length', 'handshake_timeout_ms'
+    ];
     const toUpdate = {};
     for (const key of allowed) {
       if (key in data) toUpdate[key] = data[key];

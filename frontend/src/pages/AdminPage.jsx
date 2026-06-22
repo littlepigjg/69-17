@@ -8,9 +8,94 @@ import {
   Button, IconButton
 } from '../components/Form.jsx'
 import useApi from '../hooks/useApi'
+import {
+  DATA_ENCODING,
+  DATA_ENCODING_LABELS,
+  RESPONSE_VALIDATION_MODE,
+  RESPONSE_VALIDATION_LABELS,
+  PROTOCOL_PRESETS,
+  PROTOCOL_PRESET_OPTIONS
+} from '../lib/constants.js'
 
 function ToastProvider() {
   return null
+}
+
+function TextAreaInput({ value, onChange, placeholder, disabled, rows = 3, style }) {
+  return (
+    <textarea
+      value={value ?? ''}
+      onChange={e => onChange?.(e.target.value)}
+      placeholder={placeholder}
+      disabled={disabled}
+      rows={rows}
+      style={{
+        width: '100%', padding: '10px 12px', borderRadius: 8,
+        border: '1px solid #d1d5db', fontSize: 13, outline: 'none',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
+        background: disabled ? '#f9fafb' : '#fff',
+        color: disabled ? '#9ca3af' : '#1f2937',
+        fontFamily: 'monospace', resize: 'vertical',
+        ...style
+      }}
+      onFocus={e => {
+        if (!disabled) {
+          e.target.style.borderColor = '#6366f1'
+          e.target.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.15)'
+        }
+      }}
+      onBlur={e => {
+        e.target.style.borderColor = '#d1d5db'
+        e.target.style.boxShadow = 'none'
+      }}
+    />
+  )
+}
+
+function CollapsibleSection({ title, subtitle, open, onToggle, children, accent }) {
+  return (
+    <div style={{
+      border: '1px solid #e5e7eb',
+      borderRadius: 10,
+      background: '#fff',
+      marginBottom: 16,
+      overflow: 'hidden'
+    }}>
+      <button
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          padding: '14px 16px',
+          background: accent ? '#f5f3ff' : '#fafafa',
+          border: 'none',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          textAlign: 'left'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{
+            fontSize: 16,
+            color: accent ? '#6d28d9' : '#374151',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s',
+            display: 'inline-block'
+          }}>▶</span>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14, color: '#1f2937' }}>{title}</div>
+            {subtitle && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{subtitle}</div>}
+          </div>
+        </div>
+      </button>
+      {open && (
+        <div style={{ padding: 16, borderTop: '1px solid #e5e7eb' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ServiceForm({ initial, services, onSubmit, onCancel }) {
@@ -23,13 +108,45 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
     expectedStatus: initial?.expectedStatus || 200,
     interval_seconds: initial?.interval_seconds || 30,
     timeout_ms: initial?.timeout_ms || 5000,
-    enabled: initial?.enabled !== undefined ? initial.enabled : 1
+    enabled: initial?.enabled !== undefined ? initial.enabled : 1,
+    advanced_protocol_enabled: initial?.advanced_protocol_enabled ? 1 : 0,
+    send_encoding: initial?.send_encoding || DATA_ENCODING.TEXT,
+    send_data: initial?.send_data || '',
+    validation_mode: initial?.validation_mode || RESPONSE_VALIDATION_MODE.LENGTH_RANGE,
+    expected_encoding: initial?.expected_encoding || DATA_ENCODING.TEXT,
+    expected_data: initial?.expected_data || '',
+    expected_regex: initial?.expected_regex || '',
+    min_length: initial?.min_length ?? 1,
+    max_length: initial?.max_length ?? 65535,
+    handshake_timeout_ms: initial?.handshake_timeout_ms ?? 50
   })
   const [errors, setErrors] = useState({})
+  const [advancedOpen, setAdvancedOpen] = useState(!!initial?.advanced_protocol_enabled)
+  const [presetValue, setPresetValue] = useState('')
 
   const set = (k, v) => {
     setForm(f => ({ ...f, [k]: v }))
     if (errors[k]) setErrors(e => { const n = { ...e }; delete n[k]; return n })
+  }
+
+  const applyPreset = (presetKey) => {
+    if (!presetKey) return
+    const preset = PROTOCOL_PRESETS[presetKey]
+    if (!preset) return
+    setForm(f => ({
+      ...f,
+      advanced_protocol_enabled: 1,
+      send_encoding: preset.send_encoding,
+      send_data: preset.send_data,
+      validation_mode: preset.validation_mode,
+      expected_encoding: preset.expected_encoding || f.expected_encoding,
+      expected_data: preset.expected_data !== undefined ? preset.expected_data : f.expected_data,
+      expected_regex: preset.expected_regex !== undefined ? preset.expected_regex : f.expected_regex,
+      min_length: preset.min_length !== undefined ? preset.min_length : f.min_length,
+      max_length: preset.max_length !== undefined ? preset.max_length : f.max_length
+    }))
+    setAdvancedOpen(true)
+    setTimeout(() => setPresetValue(''), 100)
   }
 
   const validate = () => {
@@ -42,6 +159,42 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
     }
     if (form.interval_seconds < 5) e.interval_seconds = '最小 5 秒'
     if (form.timeout_ms < 100) e.timeout_ms = '最小 100 毫秒'
+
+    if (form.advanced_protocol_enabled && form.type === 'tcp') {
+      const hs = Number(form.handshake_timeout_ms)
+      if (!Number.isInteger(hs) || hs < 10 || hs > 5000) {
+        e.handshake_timeout_ms = '握手超时必须在 10-5000 毫秒之间'
+      }
+      if (form.send_encoding === DATA_ENCODING.HEX && form.send_data) {
+        if (!/^[0-9a-fA-F]*$/.test(form.send_data) || form.send_data.length % 2 !== 0) {
+          e.send_data = '十六进制字符串格式错误'
+        }
+      }
+      if (form.validation_mode === RESPONSE_VALIDATION_MODE.EXACT) {
+        if (form.expected_encoding === DATA_ENCODING.HEX && form.expected_data) {
+          if (!/^[0-9a-fA-F]*$/.test(form.expected_data) || form.expected_data.length % 2 !== 0) {
+            e.expected_data = '十六进制字符串格式错误'
+          }
+        }
+      }
+      if (form.validation_mode === RESPONSE_VALIDATION_MODE.REGEX && form.expected_regex) {
+        try {
+          new RegExp(form.expected_regex)
+        } catch (err) {
+          e.expected_regex = '正则表达式语法错误: ' + err.message
+        }
+      }
+      if (form.validation_mode === RESPONSE_VALIDATION_MODE.LENGTH_RANGE) {
+        const mn = Number(form.min_length)
+        const mx = Number(form.max_length)
+        if (!Number.isInteger(mn) || mn < 0) e.min_length = '必须是非负整数'
+        if (!Number.isInteger(mx) || mx < 0) e.max_length = '必须是非负整数'
+        if (Number.isInteger(mn) && Number.isInteger(mx) && mn > mx) {
+          e.max_length = '最大值不能小于最小值'
+        }
+      }
+    }
+
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -55,8 +208,17 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
     if (data.expectedStatus) data.expectedStatus = parseInt(data.expectedStatus, 10) || 200
     if (data.port) data.port = parseInt(data.port, 10)
     data.enabled = data.enabled ? 1 : 0
+    data.advanced_protocol_enabled = data.advanced_protocol_enabled ? 1 : 0
+    if (form.type !== 'tcp') {
+      data.advanced_protocol_enabled = 0
+    }
+    data.handshake_timeout_ms = parseInt(data.handshake_timeout_ms, 10) || 50
+    data.min_length = parseInt(data.min_length, 10) || 0
+    data.max_length = parseInt(data.max_length, 10) || 65535
     await onSubmit(data)
   }
+
+  const isTcp = form.type === 'tcp'
 
   return (
     <form onSubmit={submit}>
@@ -77,19 +239,19 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
         </FormField>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: form.type === 'tcp' ? '2fr 1fr' : '1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isTcp ? '2fr 1fr' : '1fr', gap: 16 }}>
         <FormField
           label="目标地址"
           error={errors.target}
-          help={form.type === 'tcp' ? 'IP 或域名，不带端口号' : '完整 URL，可包含路径'}
+          help={isTcp ? 'IP 或域名，不带端口号' : '完整 URL，可包含路径'}
         >
           <TextInput
             value={form.target}
             onChange={v => set('target', v)}
-            placeholder={form.type === 'tcp' ? '192.168.1.100' : 'https://api.example.com/health'}
+            placeholder={isTcp ? '192.168.1.100' : 'https://api.example.com/health'}
           />
         </FormField>
-        {form.type === 'tcp' && (
+        {isTcp && (
           <FormField label="TCP 端口" error={errors.port}>
             <TextInput
               type="number"
@@ -103,7 +265,7 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
         )}
       </div>
 
-      {form.type !== 'tcp' && (
+      {!isTcp && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <FormField label="HTTP 方法">
             <SelectInput
@@ -126,6 +288,197 @@ function ServiceForm({ initial, services, onSubmit, onCancel }) {
             />
           </FormField>
         </div>
+      )}
+
+      {isTcp && (
+        <CollapsibleSection
+          title="高级协议验证"
+          subtitle="自定义握手数据和响应验证（适用于 Redis、MySQL、SMTP 等特殊协议）"
+          open={advancedOpen}
+          onToggle={() => setAdvancedOpen(v => !v)}
+          accent
+        >
+          <div style={{ marginBottom: 16 }}>
+            <CheckboxInput
+              checked={!!form.advanced_protocol_enabled}
+              onChange={v => set('advanced_protocol_enabled', v ? 1 : 0)}
+              label="启用高级协议验证"
+            />
+          </div>
+
+          {form.advanced_protocol_enabled && (
+            <>
+              <div style={{
+                padding: 12,
+                background: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: 8,
+                marginBottom: 16
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#166534', marginBottom: 8 }}>
+                  📋 常用协议预设模板
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <SelectInput
+                    value={presetValue}
+                    onChange={applyPreset}
+                    options={[
+                      { value: '', label: '选择预设模板...' },
+                      ...PROTOCOL_PRESET_OPTIONS
+                    ]}
+                    placeholder="选择预设模板..."
+                  />
+                </div>
+                <div style={{ fontSize: 11, color: '#15803d', marginTop: 6 }}>
+                  提示：变量替换支持 {{timestamp}}、{{random_hex_8}}、{{uuid}} 等
+                </div>
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#4b5563', margin: '16px 0 10px', paddingBottom: 6, borderBottom: '1px solid #e5e7eb' }}>
+                ▸ 发送数据配置
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
+                <FormField label="数据编码">
+                  <SelectInput
+                    value={form.send_encoding}
+                    onChange={v => set('send_encoding', v)}
+                    options={[
+                      { value: DATA_ENCODING.TEXT, label: DATA_ENCODING_LABELS[DATA_ENCODING.TEXT] },
+                      { value: DATA_ENCODING.HEX, label: DATA_ENCODING_LABELS[DATA_ENCODING.HEX] },
+                      { value: DATA_ENCODING.BASE64, label: DATA_ENCODING_LABELS[DATA_ENCODING.BASE64] }
+                    ]}
+                  />
+                </FormField>
+                <FormField label="握手超时（毫秒）" error={errors.handshake_timeout_ms} help="10-5000ms，默认 50ms">
+                  <TextInput
+                    type="number"
+                    value={form.handshake_timeout_ms}
+                    onChange={v => set('handshake_timeout_ms', v)}
+                    min="10"
+                    max="5000"
+                  />
+                </FormField>
+              </div>
+
+              <FormField
+                label="发送数据内容"
+                error={errors.send_data}
+                help="留空表示不发送数据，直接等待响应。支持变量替换"
+              >
+                <TextAreaInput
+                  value={form.send_data}
+                  onChange={v => set('send_data', v)}
+                  rows={3}
+                  placeholder={
+                    form.send_encoding === DATA_ENCODING.HEX
+                      ? '例: 2a310d0a24340d0a50494e470d0a'
+                      : form.send_encoding === DATA_ENCODING.BASE64
+                        ? '例: qDENCjQNCFBJTkcNCg=='
+                        : "例: *1\\r\\n$4\\r\\nPING\\r\\n"
+                  }
+                />
+              </FormField>
+
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#4b5563', margin: '16px 0 10px', paddingBottom: 6, borderBottom: '1px solid #e5e7eb' }}>
+                ▸ 响应验证配置
+              </div>
+
+              <FormField label="验证模式">
+                <SelectInput
+                  value={form.validation_mode}
+                  onChange={v => set('validation_mode', v)}
+                  options={[
+                    { value: RESPONSE_VALIDATION_MODE.LENGTH_RANGE, label: RESPONSE_VALIDATION_LABELS[RESPONSE_VALIDATION_MODE.LENGTH_RANGE] },
+                    { value: RESPONSE_VALIDATION_MODE.EXACT, label: RESPONSE_VALIDATION_LABELS[RESPONSE_VALIDATION_MODE.EXACT] },
+                    { value: RESPONSE_VALIDATION_MODE.REGEX, label: RESPONSE_VALIDATION_LABELS[RESPONSE_VALIDATION_MODE.REGEX] }
+                  ]}
+                />
+              </FormField>
+
+              {form.validation_mode === RESPONSE_VALIDATION_MODE.EXACT && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
+                    <FormField label="期望响应编码">
+                      <SelectInput
+                        value={form.expected_encoding}
+                        onChange={v => set('expected_encoding', v)}
+                        options={[
+                          { value: DATA_ENCODING.TEXT, label: DATA_ENCODING_LABELS[DATA_ENCODING.TEXT] },
+                          { value: DATA_ENCODING.HEX, label: DATA_ENCODING_LABELS[DATA_ENCODING.HEX] },
+                          { value: DATA_ENCODING.BASE64, label: DATA_ENCODING_LABELS[DATA_ENCODING.BASE64] }
+                        ]}
+                      />
+                    </FormField>
+                    <div></div>
+                  </div>
+                  <FormField label="期望响应内容" error={errors.expected_data}>
+                    <TextAreaInput
+                      value={form.expected_data}
+                      onChange={v => set('expected_data', v)}
+                      rows={3}
+                      placeholder={
+                        form.expected_encoding === DATA_ENCODING.HEX
+                          ? '例: 2b504f4e470d0a'
+                          : form.expected_encoding === DATA_ENCODING.BASE64
+                            ? '例: K1BPTkcNCg=='
+                            : "例: +PONG\r\n"
+                      }
+                    />
+                  </FormField>
+                </>
+              )}
+
+              {form.validation_mode === RESPONSE_VALIDATION_MODE.REGEX && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
+                    <FormField label="响应文本编码">
+                      <SelectInput
+                        value={form.expected_encoding}
+                        onChange={v => set('expected_encoding', v)}
+                        options={[
+                          { value: DATA_ENCODING.TEXT, label: DATA_ENCODING_LABELS[DATA_ENCODING.TEXT] },
+                          { value: DATA_ENCODING.HEX, label: DATA_ENCODING_LABELS[DATA_ENCODING.HEX] },
+                          { value: DATA_ENCODING.BASE64, label: DATA_ENCODING_LABELS[DATA_ENCODING.BASE64] }
+                        ]}
+                      />
+                    </FormField>
+                    <div></div>
+                  </div>
+                  <FormField label="正则表达式" error={errors.expected_regex} help="JS 正则语法，响应解码为文本后进行匹配">
+                    <TextAreaInput
+                      value={form.expected_regex}
+                      onChange={v => set('expected_regex', v)}
+                      rows={2}
+                      placeholder="例: ^\\+PONG[\\s\\S]*$  或  ^250[\\s\\S]*$"
+                    />
+                  </FormField>
+                </>
+              )}
+
+              {form.validation_mode === RESPONSE_VALIDATION_MODE.LENGTH_RANGE && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <FormField label="最小响应长度（字节）" error={errors.min_length}>
+                    <TextInput
+                      type="number"
+                      value={form.min_length}
+                      onChange={v => set('min_length', v)}
+                      min="0"
+                    />
+                  </FormField>
+                  <FormField label="最大响应长度（字节）" error={errors.max_length}>
+                    <TextInput
+                      type="number"
+                      value={form.max_length}
+                      onChange={v => set('max_length', v)}
+                      min="0"
+                    />
+                  </FormField>
+                </div>
+              )}
+            </>
+          )}
+        </CollapsibleSection>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -512,13 +865,19 @@ export default function AdminPage() {
                   </div>
 
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
                       <h3 style={{ fontSize: 16, fontWeight: 600 }}>{svc.name}</h3>
                       {!svc.enabled && (
                         <span style={{
                           padding: '2px 8px', fontSize: 11, borderRadius: 4,
                           background: '#e5e7eb', color: '#4b5563', fontWeight: 500
                         }}>已停用</span>
+                      )}
+                      {svc.type === 'tcp' && svc.advanced_protocol_enabled && (
+                        <span style={{
+                          padding: '2px 8px', fontSize: 11, borderRadius: 4,
+                          background: '#ede9fe', color: '#6d28d9', fontWeight: 500
+                        }}>🔐 协议握手</span>
                       )}
                     </div>
                     <div style={{
@@ -529,6 +888,9 @@ export default function AdminPage() {
                       <span>→</span>
                       <span>{svc.target}{svc.type === 'tcp' && svc.port ? `:${svc.port}` : ''}</span>
                       {svc.type !== 'tcp' && <span>[{svc.method} / {svc.expectedStatus}]</span>}
+                      {svc.type === 'tcp' && svc.advanced_protocol_enabled && (
+                        <span style={{ color: '#6d28d9' }}>[握手:{svc.handshake_timeout_ms || 50}ms]</span>
+                      )}
                       <span style={{ color: '#9ca3af' }}>· 每{svc.interval_seconds}s · 超时{svc.timeout_ms}ms</span>
                     </div>
                     {svc.summary?.status && (
