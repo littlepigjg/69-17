@@ -37,6 +37,8 @@ async function runCheck(service) {
     response_time_ms: rawResult.response_time_ms ?? null,
     error_message: isMaintenance ? null : (rawResult.error_message || null),
     status_code: rawResult.status_code ?? null,
+    handshake_sent: rawResult.handshake_sent || null,
+    handshake_recv: rawResult.handshake_recv || null,
     is_maintenance: isMaintenance ? 1 : 0
   }
 

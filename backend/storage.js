@@ -104,10 +104,26 @@ async function initDB() {
       response_time_ms INTEGER,
       error_message TEXT,
       status_code INTEGER,
+      handshake_sent TEXT,
+      handshake_recv TEXT,
       is_maintenance INTEGER DEFAULT 0
     )
   `);
   dirty = true;
+
+  try {
+    const rcols = db.exec("PRAGMA table_info(check_results)")[0].values.map(r => r[1]);
+    const rnewCols = [
+      ['handshake_sent', 'TEXT'],
+      ['handshake_recv', 'TEXT']
+    ];
+    for (const [col, def] of rnewCols) {
+      if (!rcols.includes(col)) {
+        db.run(`ALTER TABLE check_results ADD COLUMN ${col} ${def}`);
+        dirty = true;
+      }
+    }
+  } catch (e) {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS maintenance_windows (
@@ -149,7 +165,9 @@ function appendLog(serviceId, result) {
       rt: result.response_time_ms,
       msg: result.error_message || '',
       status: result.status_code || '',
-      maint: result.is_maintenance ? 1 : 0
+      maint: result.is_maintenance ? 1 : 0,
+      hs_sent: result.handshake_sent || '',
+      hs_recv: result.handshake_recv || ''
     }) + '\n';
     fs.appendFileSync(logFile, line, 'utf8');
   } catch (e) {
@@ -246,9 +264,15 @@ const services = {
 const checkResults = {
   insert: async (result) => {
     const res = run(
-      `INSERT INTO check_results (service_id, timestamp, success, response_time_ms, error_message, status_code, is_maintenance)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [result.service_id, result.timestamp, result.success, result.response_time_ms, result.error_message, result.status_code, result.is_maintenance]
+      `INSERT INTO check_results (
+        service_id, timestamp, success, response_time_ms,
+        error_message, status_code, handshake_sent, handshake_recv, is_maintenance
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        result.service_id, result.timestamp, result.success, result.response_time_ms,
+        result.error_message, result.status_code, result.handshake_sent || null,
+        result.handshake_recv || null, result.is_maintenance
+      ]
     );
     appendLog(result.service_id, result);
     if (process.memoryUsage().heapUsed > 512 * 1024 * 1024) saveDB();
